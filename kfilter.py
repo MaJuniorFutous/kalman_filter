@@ -86,11 +86,14 @@ class KalmanFilter:
 
     def forward(
             self, 
-            data: Union[np.ndarray, pd.DataFrame], 
-            R: np.array = None):
-        if not isinstance(data, (np.ndarray, pd.DataFrame)):
+            data: Union[np.ndarray, pd.DataFrame, pd.Series], 
+            R: np.array = None,
+            Q: np.array = None):
+        if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
+        if isinstance(data, pd.Series):
+            data = data.to_frame()
         if isinstance(data, pd.DataFrame):
             xs = []
             for row in data.itertuples(index=False):
@@ -138,11 +141,18 @@ if __name__ == '__main__':
         (df["datetime"] - df["datetime"].shift(1)).dt.days
     )
     df['A'] = df['delta_v'].apply(lambda x: np_arr([[1, x],[0, 1]]))
+    #TODO: create dynamic R based on scale error as % bodyweight
     filter = KalmanFilter(
         n_state_var=n_state_var,
         n_measurement_inputs=1,
     )
+    #* pass dynamic Q (how “non-constant” your weight trend is) and R based on scale error as % bodyweight
     filter.forward(
         data=df['body_weight'],
         R=np.identity(n_state_var, dtype=float) * err_obs_pos**2,
+        Q=np.array([
+            [0.1, 0.0],
+            [0.0, 0.01]
+        ])
+
     )
