@@ -83,32 +83,40 @@ class KalmanFilter:
         # equation
         # P = (self._I - self.K@self.H)@self.P  # faster (asymetrical)
         self.P = (self._I - self.K@self.H)@self.P@(self._I - self.K@self.H).T + self.K@R@self.K.T  # Joseph form (symetrical) 
+    
+    @staticmethod
+    def _to_numpy(x):
+        if x is None: return None
+
+        if isinstance(x, (pd.Series, pd.DataFrame)):
+            assert not x.empty, "Pandas object cannot be empty"
+            return x.to_numpy()
+
+        assert isinstance(x, np.ndarray), (
+            f"Expected None, numpy.ndarray, pandas.Series, or pandas.DataFrame, got {type(x)}"
+        )
+        assert x.size != 0, "NumPy array cannot be empty"
+        return x
 
     def forward(
             self, 
             data: Union[np.ndarray, pd.DataFrame, pd.Series], 
-            R: np.array = None,
-            Q: np.array = None):
+            R: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
+            Q: Union[np.ndarray, pd.DataFrame, pd.Series] = None):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
-        if isinstance(data, pd.Series):
-            data = data.to_frame()
-        if isinstance(data, pd.DataFrame):
-            xs = []
-            for row in data.itertuples(index=False):
-                z = np_arr(row)
-                #TODO: arrange row in np array and 2x1 without A, and also pass A to self.predict()
-                self._predict(data=...)
-                #!! Note: Set R manually when calling self._update() based on R param
-        else:
-            #TODO: Need to create this for numpy arrays
-            return self._fit_predict()
+        data, R, Q = self._to_numpy(data), self._to_numpy(R), self._to_numpy(Q)
+        for obs, r, q in zip(data, R, Q):
+            ...
         
 
 if __name__ == '__main__':
-    err_obs_pos = 2 # default, standard bathroom scale error += 1% or 2% of current body weight
-    default_t, n_state_var = 1, 2
+    # For R matrix
+    err_obs_pos = 0.0025 # default, standard bathroom scale error += 1% or 2% of current body weight
+    default_t, n_state_var, n_measurement_var = 1, 2, 1
+    # For Q matrix percentages
+    bw_perc, vel_perc = 0.005, 0.0005
     
     data = {
         "body_weight": [
@@ -140,19 +148,20 @@ if __name__ == '__main__':
     df["delta_v"] = (
         (df["datetime"] - df["datetime"].shift(1)).dt.days
     )
-    df['A'] = df['delta_v'].apply(lambda x: np_arr([[1, x],[0, 1]]))
+    df['A'] = [np_arr([[1, dt],[0, 1]]) for dt in df['delta_v']]
+
+    # create Q and R matrices
+    df['R'] = [np.identity(n_measurement_var, dtype=float) * ((bw*err_obs_pos)**2) for bw in df['body_weight']]
+    df['Q'] = [np_arr([[(bw*bw_perc)**2, 0],[0, (bw*vel_perc)**2]]) for bw in df['body_weight']]
+
     #TODO: create dynamic R based on scale error as % bodyweight
     filter = KalmanFilter(
         n_state_var=n_state_var,
-        n_measurement_inputs=1,
+        n_measurement_inputs=n_measurement_var,
     )
     #* pass dynamic Q (how “non-constant” your weight trend is) and R based on scale error as % bodyweight
     filter.forward(
         data=df['body_weight'],
-        R=np.identity(n_state_var, dtype=float) * err_obs_pos**2,
-        Q=np.array([
-            [0.1, 0.0],
-            [0.0, 0.01]
-        ])
-
+        R=df['R'],
+        Q=df['Q']
     )
