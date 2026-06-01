@@ -7,35 +7,40 @@ def np_arr(x: list): return np.array(x, dtype=float)
 
 class KalmanFilter:
 
-    #TODO: Initialize these to zeros or identoties based on shape/structure of X
+    #TODO: Initialize these to zeros or identities based on shape/structure of X
     def __init__(
             self,
             n_state_var: int,
             n_measurement_inputs: int,
-            B: np.array = None):
+            A: np.array = None,
+            H: np.array = None,
+            B: np.array = None,
+            R: np.array = None,
+            q: np.array = None):
 
         self.n_state_var = n_state_var
         self.n_measurement_inputs = n_measurement_inputs
 
         self.x = np.zeros((n_state_var, 1))
         self.P = np.identity(n_state_var)  # PCM
-        self.H = np.zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
-        self.A = np.identity(n_state_var)  # state transition matrix
+        self.H = H if H.size!=0 else np.zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
+        self.A = A if A else np.identity(n_state_var)  # state transition matrix
         self.B = B  # control matrix
-        self.q = np.identity(n_state_var)  # process noise covariance
-        self.R = np.identity(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
+        self.q = q if q else np.identity(n_state_var)  # process noise covariance
+        self.R = R if R else np.identity(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
         self._I = np.identity(n_state_var)
         self.K = np.zeros((n_state_var, n_measurement_inputs)) # Kalman gain
+
+        assert self.H.shape == (n_measurement_inputs, n_state_var), "H shape does not match n_measurement_inputs and n_state_var"
 
         #* A matrix needs to be a 2x2 if state is 2x1, 3x3 if state is 3x1, etc
     
     #TODO: Determine correct typing enforcement
     def _predict(
             self, 
-            data: np.array, 
             A: np.array = None, 
             B: np.array = None,
-            q: np.array = None,  #eg. calories
+            q: np.array = None,  #eg. nutrition facts label error
             u = None):
         if B is None:
             B = self.B
@@ -43,13 +48,9 @@ class KalmanFilter:
             A = self.A
         if q is None:
             q = self.q
-
-        #TODO: Check all values that can be scalars are and if so, set their shape
-        # reshape array
-        self.x = np.array([[i] for i in data])
-
+            
         # state prediction
-        if B is not None and u is not None:
+        if B is not None and (u is not None and u != 0):
             self.x = A@self.x + B@u
         else:
             self.x = A@self.x
@@ -77,10 +78,9 @@ class KalmanFilter:
         S = self.H@self.P@self.H.T + R #inovation covariance
         self.K = np.linalg.solve(S.T, (self.H@self.P.T)).T
 
-        #TODO: Check equation video on this phase!!!!
+        #! Shape mismatch
         self.x = self.x + self.K@(z - self.H@self.x)
 
-        # equation
         # P = (self._I - self.K@self.H)@self.P  # faster (asymetrical)
         self.P = (self._I - self.K@self.H)@self.P@(self._I - self.K@self.H).T + self.K@R@self.K.T  # Joseph form (symetrical) 
     
@@ -97,18 +97,46 @@ class KalmanFilter:
         )
         assert x.size != 0, "NumPy array cannot be empty"
         return x
+    
+    @staticmethod
+    def _construct_state(H, z):
+        H = np.asarray(H, dtype=float)
+        z = np.asarray(z, dtype=float).reshape(-1, 1)
+        return np.linalg.pinv(H)@z
 
     def forward(
             self, 
             data: Union[np.ndarray, pd.DataFrame, pd.Series], 
             R: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            Q: Union[np.ndarray, pd.DataFrame, pd.Series] = None):
+            q: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
+            A: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
+            B: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
+            u: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
+            ignore_1st: bool = True):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
-        data, R, Q = self._to_numpy(data), self._to_numpy(R), self._to_numpy(Q)
-        for obs, r, q in zip(data, R, Q):
-            ...
+        data, R, q, A, B, u = self._to_numpy(data), self._to_numpy(R), self._to_numpy(q), self._to_numpy(A), self._to_numpy(B), self._to_numpy(u)
+        records = [
+            {
+                'record': i,
+                'data': data[i],
+                'R': None if R is None else R[i],
+                'q': None if q is None else q[i],
+                'A': None if A is None else A[i],
+                'B': None if B is None else B[i],
+                'u': None if u is None else u[i]
+            } for i in range(len(data))
+        ]
+
+        for record in records:
+            new_obs = self._construct_state(H=self.H, z=record['data'])
+            if ignore_1st and record['record'] == 0:
+                self.x = new_obs
+                continue
+
+            self._predict(A=record['A'], q=record['q'], B=record['B'], u=record['u'])
+            self._update(z=new_obs, R=record['R'])
         
 
 if __name__ == '__main__':
@@ -148,20 +176,27 @@ if __name__ == '__main__':
     df["delta_v"] = (
         (df["datetime"] - df["datetime"].shift(1)).dt.days
     )
-    df['A'] = [np_arr([[1, dt],[0, 1]]) for dt in df['delta_v']]
+    df['A'] = [np_arr([[1, dt if not np.isnan(dt) else 0],[0, 1]]) for dt in df['delta_v']]
 
     # create Q and R matrices
     df['R'] = [np.identity(n_measurement_var, dtype=float) * ((bw*err_obs_pos)**2) for bw in df['body_weight']]
-    df['Q'] = [np_arr([[(bw*bw_perc)**2, 0],[0, (bw*vel_perc)**2]]) for bw in df['body_weight']]
+    df['q'] = [np_arr([[(bw*bw_perc)**2, 0],[0, (bw*vel_perc)**2]]) for bw in df['body_weight']]
 
     #TODO: create dynamic R based on scale error as % bodyweight
     filter = KalmanFilter(
         n_state_var=n_state_var,
         n_measurement_inputs=n_measurement_var,
+        H=np_arr(
+            [[1, 0]]
+        )
     )
     #* pass dynamic Q (how “non-constant” your weight trend is) and R based on scale error as % bodyweight
     filter.forward(
         data=df['body_weight'],
         R=df['R'],
-        Q=df['Q']
+        q=df['q'],
+        A=df['A'],
+        # B=df['B'],
+        # u=df['u'],
+        ignore_1st=True
     )
