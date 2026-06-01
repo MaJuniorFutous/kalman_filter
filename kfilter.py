@@ -61,11 +61,19 @@ class KalmanFilter:
 
         #TODO: Hold on to prior PCM (PCM_k-1) and state prior to update
 
-    def _update(self, z: np.array, R = None):
+    def _update(self, z: Union[np.ndarray, float], R = None):
         if R is None:
             R = self.R
         elif np.isscalar(R):
             R = np.identity(self.n_measurement_inputs) * R
+
+        z = np.atleast_2d(z)
+        if z.shape[1] == self.n_measurement_inputs: z = z.T
+
+        if z.shape != (self.n_measurement_inputs, 1):
+            raise ValueError(
+                f"Cant reshape z correctly, need: {(self.n_measurement_inputs, 1)}"
+            )
 
         # Kalman Gain
         # equation (deprecated, we dont actually need to calculate the inverse)
@@ -130,13 +138,12 @@ class KalmanFilter:
         ]
 
         for record in records:
-            new_obs = self._construct_state(H=self.H, z=record['data'])
             if ignore_1st and record['record'] == 0:
-                self.x = new_obs
+                self.x = self._construct_state(H=self.H, z=record['data'])
                 continue
 
             self._predict(A=record['A'], q=record['q'], B=record['B'], u=record['u'])
-            self._update(z=new_obs, R=record['R'])
+            self._update(z=record['data'], R=record['R'])
         
 
 if __name__ == '__main__':
