@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Any, Union, Literal
 
 import numpy as np, pandas as pd
 
@@ -120,10 +120,17 @@ class KalmanFilter:
             A: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
             B: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
             u: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            ignore_1st: bool = True):
+            ignore_1st: bool = False,
+            batch_init: Union[Literal["minute", "hour", "day", "week", "month"], int] = None,
+            batch_init_negate_cv: bool | None = None):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
+        if batch_init_negate_cv is not None and batch_init is None:
+            raise ValueError("batch_init must be set if batch_init_negate_cv is provided")
+        if ignore_1st and (batch_init_negate_cv or batch_init_negate_cv):
+            print("Prioritizing batch initialization over initial state setting using 1st row.")
+        
         data, R, q, A, B, u = self._to_numpy(data), self._to_numpy(R), self._to_numpy(q), self._to_numpy(A), self._to_numpy(B), self._to_numpy(u)
         records = [
             {
@@ -193,9 +200,7 @@ if __name__ == '__main__':
     filter = KalmanFilter(
         n_state_var=n_state_var,
         n_measurement_inputs=n_measurement_var,
-        H=np_arr(
-            [[1, 0]]
-        )
+        H=np_arr([[1, 0]])
     )
     #* pass dynamic Q (how “non-constant” your weight trend is) and R based on scale error as % bodyweight
     filter.forward(
@@ -205,5 +210,6 @@ if __name__ == '__main__':
         A=df['A'],
         # B=df['B'],
         # u=df['u'],
-        ignore_1st=True
+        ignore_1st=True,
+        batch_init=7
     )
