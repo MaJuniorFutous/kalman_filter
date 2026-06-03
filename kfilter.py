@@ -1,4 +1,5 @@
 from typing import Any, Union, Literal
+import datetime
 
 import numpy as np, pandas as pd
 
@@ -86,7 +87,6 @@ class KalmanFilter:
         S = self.H@self.P@self.H.T + R #inovation covariance
         self.K = np.linalg.solve(S.T, (self.H@self.P.T)).T
 
-        #! Shape mismatch
         self.x = self.x + self.K@(z - self.H@self.x)
 
         # P = (self._I - self.K@self.H)@self.P  # faster (asymetrical)
@@ -111,27 +111,44 @@ class KalmanFilter:
         H = np.asarray(H, dtype=float)
         z = np.asarray(z, dtype=float).reshape(-1, 1)
         return np.linalg.pinv(H)@z
+    
+    def _initialize_pcm(self, data: np.array, init_n: int, negate_cv: bool = False, transpose: bool = False):
+        subset = data[:init_n]
+
+        if transpose: data_n_vars, rowvar = data.shape[1], False
+        else: data_n_vars, rowvar = data.shape[0], True
+
+        assert data_n_vars == self.P.shape[1], f"Incorrect number of data vars {data_n_vars}, need to match {self.P.shape[1]}"
+        self.P = np.cov(m=subset, rowvar=rowvar, dtype=float)
+        if negate_cv: self.P = np.diag(np.diag(self.P))
+        return data[init_n:]
 
     def forward(
             self, 
             data: Union[np.ndarray, pd.DataFrame, pd.Series], 
-            R: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            q: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            A: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            B: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            u: Union[np.ndarray, pd.DataFrame, pd.Series] = None,
-            ignore_1st: bool = False,
-            batch_init: Union[Literal["minute", "hour", "day", "week", "month"], int] = None,
+            R: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
+            q: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
+            A: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
+            B: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
+            u: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
+            return_history: bool = False,
+            batch_init_n: int | None = None,
             batch_init_negate_cv: bool | None = None):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
-        if batch_init_negate_cv is not None and batch_init is None:
+        if batch_init_negate_cv is not None and batch_init_n is None:
             raise ValueError("batch_init must be set if batch_init_negate_cv is provided")
-        if ignore_1st and (batch_init_negate_cv or batch_init_negate_cv):
-            print("Prioritizing batch initialization over initial state setting using 1st row.")
+        # if ignore_1st and (batch_init_negate_cv or batch_init_negate_cv):
+        #     print("Prioritizing batch initialization over initial state setting using 1st row.")
         
         data, R, q, A, B, u = self._to_numpy(data), self._to_numpy(R), self._to_numpy(q), self._to_numpy(A), self._to_numpy(B), self._to_numpy(u)
+        if batch_init_n:
+            data = self._initialize_pcm(
+                data=data, 
+                init_n=batch_init_n, 
+                negate_cv=batch_init_negate_cv,
+                transpose=True)
         records = [
             {
                 'record': i,
@@ -144,13 +161,18 @@ class KalmanFilter:
             } for i in range(len(data))
         ]
 
+        if return_history: estimations = []
         for record in records:
-            if ignore_1st and record['record'] == 0:
-                self.x = self._construct_state(H=self.H, z=record['data'])
-                continue
+            #! deprecated ignore_first
+            # if ignore_1st and record['record'] == 0:
+            #     self.x = self._construct_state(H=self.H, z=record['data'])
+            #     continue
 
             self._predict(A=record['A'], q=record['q'], B=record['B'], u=record['u'])
             self._update(z=record['data'], R=record['R'])
+            # if return_history:
+            #     estimations.append()
+
         
 
 if __name__ == '__main__':
@@ -165,6 +187,11 @@ if __name__ == '__main__':
             184.5, 183.5, 184.5, 184.5, 186.5,
             184.7, 184.7, 185.2, 186.6, 188.7,
             186.6, 187.0, 185.3, 186.5
+        ],
+        "delete": [
+            185.1, 182.8, 185.0, 183.9, 187.2,
+            183.8, 185.4, 184.6, 187.3, 187.9,
+            185.7, 188.1, 184.5, 187.0
         ],
         "datetime": pd.to_datetime([
             "2026-05-13",
@@ -186,6 +213,7 @@ if __name__ == '__main__':
 
     df = pd.DataFrame(data)
     df.sort_values('datetime', ascending=True, inplace=True)
+    batch_init_n = int((df['datetime'].dt.date > (pd.Timestamp.now().date() - pd.Timedelta(days=30))).sum())
     # get dynamic delta T
     df["delta_v"] = (
         (df["datetime"] - df["datetime"].shift(1)).dt.days
@@ -204,12 +232,13 @@ if __name__ == '__main__':
     )
     #* pass dynamic Q (how “non-constant” your weight trend is) and R based on scale error as % bodyweight
     filter.forward(
-        data=df['body_weight'],
+        data=df[['body_weight', 'delete']],
         R=df['R'],
         q=df['q'],
         A=df['A'],
         # B=df['B'],
         # u=df['u'],
-        ignore_1st=True,
-        batch_init=7
+        return_history=True,
+        batch_init_n=batch_init_n,
+        batch_init_negate_cv=True
     )
