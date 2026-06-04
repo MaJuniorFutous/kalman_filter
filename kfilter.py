@@ -1,4 +1,4 @@
-from typing import Any, Union, Literal
+from typing import Any, Union, Literal, Optional
 import datetime
 
 import numpy as np, pandas as pd
@@ -106,28 +106,65 @@ class KalmanFilter:
         assert x.size != 0, "NumPy array cannot be empty"
         return x
     
-    @staticmethod
-    def _construct_state(H, z):
-        H = np.asarray(H, dtype=float)
-        z = np.asarray(z, dtype=float).reshape(-1, 1)
-        return np.linalg.pinv(H)@z
+    def _construct_state(self, z, H: Optional[np.array] = None):
+        if H is None: H = self.H
+        return np.linalg.pinv(np.asarray(H, dtype=float))@np.asarray(z, dtype=float).reshape(-1, 1)
     
-    def _initialize_pcm(self, data: np.array, init_n: int, negate_cv: bool = False, transpose: bool = False):
-        self.P = np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float)
+    def _bootstrap_pcm(
+            self, 
+            data: np.array, 
+            init_n: int,
+            negate_cv: bool = False, 
+            unobserved_variance: float = 0.0, 
+            transpose: bool = False):
+        temp_pcm = np.atleast_2d(np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float))
+        observed_idx = np.where(np.any(self.H != 0, axis=0))[0]
+
+        assert temp_pcm.shape == (len(observed_idx), len(observed_idx)), \
+            "Temp PCM shape mismatch with number of observation variables."
+
+        self.P = np.full((self.n_state_var, self.n_state_var), unobserved_variance, dtype=float)
+        
+        #! Deprecated np.zeros for np.full now that we have unobserved_variance param
+        # self.P = np.zeros((self.n_state_var, self.n_state_var))
+
+        self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
         if negate_cv: self.P = np.diag(np.diag(self.P))
         return data[init_n:]
 
+    def _bootstrap_filter(
+            self, 
+            data: np.array, 
+            init_n: int,
+            negate_cv: bool = False, 
+            unobserved_variance: float = 0.0, 
+            transpose: bool = False):
+        temp_pcm = np.atleast_2d(np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float))
+        observed_idx = np.where(np.any(self.H != 0, axis=0))[0]
+
+        assert temp_pcm.shape == (len(observed_idx), len(observed_idx)), \
+            "Temp PCM shape mismatch with number of observation variables."
+
+        self.P = np.full((self.n_state_var, self.n_state_var), unobserved_variance, dtype=float)
+        
+        #! Deprecated np.zeros for np.full now that we have unobserved_variance param
+        # self.P = np.zeros((self.n_state_var, self.n_state_var))
+
+        self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
+        if negate_cv: self.P = np.diag(np.diag(self.P))
+        return data[init_n:], self._construct_state(z=data[init_n - 1])
+
     def forward(
             self, 
-            data: Union[np.ndarray, pd.DataFrame, pd.Series], 
-            R: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
-            q: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
-            A: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
-            B: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
-            u: Union[np.ndarray, pd.DataFrame, pd.Series] | None = None,
-            return_history: bool = False,
-            batch_init_n: int | None = None,
-            batch_init_negate_cv: bool | None = None):
+            data: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]], 
+            R: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
+            q: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
+            A: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
+            B: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
+            u: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
+            return_history: Optional[bool] = False,
+            batch_init_n: Optional[int] = None,
+            batch_init_negate_cv: Optional[bool] = None):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
@@ -138,10 +175,11 @@ class KalmanFilter:
         
         data, R, q, A, B, u = self._to_numpy(data), self._to_numpy(R), self._to_numpy(q), self._to_numpy(A), self._to_numpy(B), self._to_numpy(u)
         if batch_init_n:
-            data = self._initialize_pcm(
+            data = self._bootstrap_filter(
                 data=data, 
                 init_n=batch_init_n, 
                 negate_cv=batch_init_negate_cv,
+                unobserved_variance=0.32,
                 transpose=True)
         records = [
             {
@@ -157,17 +195,11 @@ class KalmanFilter:
 
         if return_history: estimations = []
         for record in records:
-            #! deprecated ignore_first param
-            # if ignore_1st and record['record'] == 0:
-            #     self.x = self._construct_state(H=self.H, z=record['data'])
-            #     continue
-
             self._predict(A=record['A'], q=record['q'], B=record['B'], u=record['u'])
             self._update(z=record['data'], R=record['R'])
-            # if return_history:
-            #     estimations.append()
-
-        
+            if return_history:
+                estimations.append()
+                
 
 if __name__ == '__main__':
     # For R matrix
