@@ -113,13 +113,7 @@ class KalmanFilter:
         return np.linalg.pinv(H)@z
     
     def _initialize_pcm(self, data: np.array, init_n: int, negate_cv: bool = False, transpose: bool = False):
-        subset = data[:init_n]
-
-        if transpose: data_n_vars, rowvar = data.shape[1], False
-        else: data_n_vars, rowvar = data.shape[0], True
-
-        assert data_n_vars == self.P.shape[1], f"Incorrect number of data vars {data_n_vars}, need to match {self.P.shape[1]}"
-        self.P = np.cov(m=subset, rowvar=rowvar, dtype=float)
+        self.P = np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float)
         if negate_cv: self.P = np.diag(np.diag(self.P))
         return data[init_n:]
 
@@ -163,7 +157,7 @@ class KalmanFilter:
 
         if return_history: estimations = []
         for record in records:
-            #! deprecated ignore_first
+            #! deprecated ignore_first param
             # if ignore_1st and record['record'] == 0:
             #     self.x = self._construct_state(H=self.H, z=record['data'])
             #     continue
@@ -232,7 +226,8 @@ if __name__ == '__main__':
     )
     #* pass dynamic Q (how “non-constant” your weight trend is) and R based on scale error as % bodyweight
     filter.forward(
-        data=df[['body_weight', 'delete']],
+        # data=df[['body_weight', 'delete']],
+        data=df['body_weight'],
         R=df['R'],
         q=df['q'],
         A=df['A'],
