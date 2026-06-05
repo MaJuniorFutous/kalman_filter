@@ -1,0 +1,1 @@
+A directory for util or helper python functions and classes. While this remains small, do not require __init__.py file.
