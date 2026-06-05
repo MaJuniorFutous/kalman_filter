@@ -8,7 +8,6 @@ def np_arr(x: list): return np.array(x, dtype=float)
 
 class KalmanFilter:
 
-    #TODO: Initialize these to zeros or identities based on shape/structure of X
     def __init__(
             self,
             n_state_var: int,
@@ -36,7 +35,6 @@ class KalmanFilter:
 
         #* A matrix needs to be a 2x2 if state is 2x1, 3x3 if state is 3x1, etc
     
-    #TODO: Determine correct typing enforcement
     def _predict(
             self, 
             A: np.array = None, 
@@ -69,7 +67,8 @@ class KalmanFilter:
             R = np.identity(self.n_measurement_inputs) * R
 
         z = np.atleast_2d(z)
-        if z.shape[1] == self.n_measurement_inputs: z = z.T
+        if z.shape[1] == self.n_measurement_inputs: 
+            z = z.T
 
         if z.shape != (self.n_measurement_inputs, 1):
             raise ValueError(
@@ -93,51 +92,30 @@ class KalmanFilter:
         self.P = (self._I - self.K@self.H)@self.P@(self._I - self.K@self.H).T + self.K@R@self.K.T  # Joseph form (symetrical) 
     
     @staticmethod
-    def _to_numpy(x):
+    def _to_numpy(x, transpose: bool = False):
         if x is None: return None
 
         if isinstance(x, (pd.Series, pd.DataFrame)):
             assert not x.empty, "Pandas object cannot be empty"
-            return x.to_numpy()
+            return x.to_numpy().T if transpose else x.to_numpy()
 
         assert isinstance(x, np.ndarray), (
             f"Expected None, numpy.ndarray, pandas.Series, or pandas.DataFrame, got {type(x)}"
         )
         assert x.size != 0, "NumPy array cannot be empty"
-        return x
+        return x.T if transpose else x
     
     def _construct_state(self, z, H: Optional[np.array] = None):
         if H is None: H = self.H
         return np.linalg.pinv(np.asarray(H, dtype=float))@np.asarray(z, dtype=float).reshape(-1, 1)
     
-    def _bootstrap_pcm(
-            self, 
-            data: np.array, 
-            init_n: int,
-            negate_cv: bool = False, 
-            unobserved_variance: float = 0.0, 
-            transpose: bool = False):
-        temp_pcm = np.atleast_2d(np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float))
-        observed_idx = np.where(np.any(self.H != 0, axis=0))[0]
-
-        assert temp_pcm.shape == (len(observed_idx), len(observed_idx)), \
-            "Temp PCM shape mismatch with number of observation variables."
-
-        self.P = np.full((self.n_state_var, self.n_state_var), unobserved_variance, dtype=float)
-        
-        #! Deprecated np.zeros for np.full now that we have unobserved_variance param
-        # self.P = np.zeros((self.n_state_var, self.n_state_var))
-
-        self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
-        if negate_cv: self.P = np.diag(np.diag(self.P))
-        return data[init_n:]
-
     def _bootstrap_filter(
             self, 
             data: np.array, 
             init_n: int,
             negate_cv: bool = False, 
             unobserved_variance: float = 0.0, 
+            initialize_state: bool = False,
             transpose: bool = False):
         temp_pcm = np.atleast_2d(np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float))
         observed_idx = np.where(np.any(self.H != 0, axis=0))[0]
@@ -152,7 +130,8 @@ class KalmanFilter:
 
         self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
         if negate_cv: self.P = np.diag(np.diag(self.P))
-        return data[init_n:], self._construct_state(z=data[init_n - 1])
+        if initialize_state: self.x = self._construct_state(z=data[init_n - 1])
+        return data[init_n:]
 
     def forward(
             self, 
@@ -180,10 +159,10 @@ class KalmanFilter:
                 init_n=batch_init_n, 
                 negate_cv=batch_init_negate_cv,
                 unobserved_variance=0.32,
+                initialize_state=True,
                 transpose=True)
         records = [
             {
-                'record': i,
                 'data': data[i],
                 'R': None if R is None else R[i],
                 'q': None if q is None else q[i],
@@ -198,7 +177,12 @@ class KalmanFilter:
             self._predict(A=record['A'], q=record['q'], B=record['B'], u=record['u'])
             self._update(z=record['data'], R=record['R'])
             if return_history:
-                estimations.append()
+                #TODO: Think of dyanmic way to send back the states we want
+                estimations.append([self.x[0][0], self.x[1][0]])
+        
+        if not return_history: return [[self.x[0][0], self.x[1][0]]]
+        else: return estimations
+        
                 
 
 if __name__ == '__main__':
