@@ -2,11 +2,15 @@ from typing import Any, Union, Literal, Optional
 import datetime
 
 import numpy as np, pandas as pd
-
+import utils as futils
 
 #TODO: Create save mechanism
 
 class KalmanFilter:
+
+    STATIC_MATRICES = ['H', 'B', 'R', 'q', 'A']
+    RUNTIME_MATRICES = ['x', 'P', 'K']
+    MODEL_PARAMS = ['n_state_var', 'n_measurement_inputs']
 
     def __init__(
             self,
@@ -16,20 +20,23 @@ class KalmanFilter:
             H: np.array = None,
             B: np.array = None,
             R: np.array = None,
-            q: np.array = None):
+            q: np.array = None,
+            save_file: str = 'kfilter_save.npz'):
 
         self.n_state_var = n_state_var
         self.n_measurement_inputs = n_measurement_inputs
 
-        self.x = np.zeros((n_state_var, 1))
-        self.P = np.identity(n_state_var)  # PCM
-        self.H = H if H.size!=0 else np.zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
-        self.A = A if A else np.identity(n_state_var)  # state transition matrix
+        self.x = futils.np_zeros((n_state_var, 1))
+        self.P = futils.np_ident(n_state_var)  # PCM
+        self.H = H if H.size!=0 else futils.np_zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
+        self.A = A if A else futils.np_ident(n_state_var)  # state transition matrix
         self.B = B  # control matrix
-        self.q = q if q else np.identity(n_state_var)  # process noise covariance
-        self.R = R if R else np.identity(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
-        self._I = np.identity(n_state_var)
-        self.K = np.zeros((n_state_var, n_measurement_inputs)) # Kalman gain
+        self.q = q if q else futils.np_ident(n_state_var)  # process noise covariance
+        self.R = R if R else futils.np_ident(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
+        self._I = futils.np_ident(n_state_var)
+        self.K = futils.np_zeros((n_state_var, n_measurement_inputs)) # Kalman gain
+
+        self.save_file = save_file
 
         assert self.H.shape == (n_measurement_inputs, n_state_var), "H shape does not match n_measurement_inputs and n_state_var"
 
@@ -51,8 +58,7 @@ class KalmanFilter:
         # state prediction
         if B is not None and (u is not None and u != 0):
             self.x = A@self.x + B@u
-        else:
-            self.x = A@self.x
+        else: self.x = A@self.x
 
         #* Main equation X_k = X_k-1 + V_k-1*deltaT
         # Process covariance prediction
@@ -61,14 +67,12 @@ class KalmanFilter:
         #TODO: Hold on to prior PCM (PCM_k-1) and state prior to update
 
     def _update(self, z: Union[np.ndarray, float], R = None):
-        if R is None:
-            R = self.R
+        if R is None: R = self.R
         elif np.isscalar(R):
-            R = np.identity(self.n_measurement_inputs) * R
+            R = futils.np_ident(self.n_measurement_inputs) * R
 
         z = np.atleast_2d(z)
-        if z.shape[1] == self.n_measurement_inputs: 
-            z = z.T
+        if z.shape[1] == self.n_measurement_inputs: z = z.T
 
         if z.shape != (self.n_measurement_inputs, 1):
             raise ValueError(
@@ -115,22 +119,28 @@ class KalmanFilter:
             init_n: int,
             negate_cv: bool = False, 
             unobserved_variance: float = 0.0, 
-            initialize_state: bool = False,
+            initialize_pcm: bool = False,
             transpose: bool = False):
-        temp_pcm = np.atleast_2d(np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float))
-        observed_idx = np.where(np.any(self.H != 0, axis=0))[0]
+        assert init_n > 0, "Must pass larger than 0 integer for 'init_n'"
+        if initialize_pcm:
+            if init_n <= 1:
+                print("Can't initialize PCM. init_n needs to be at least 2")
+            else:
+                temp_pcm = np.atleast_2d(np.cov(m=data[:init_n], rowvar=False if transpose else True, dtype=float))
+                observed_idx = np.where(np.any(self.H != 0, axis=0))[0]
 
-        assert temp_pcm.shape == (len(observed_idx), len(observed_idx)), \
-            "Temp PCM shape mismatch with number of observation variables."
+                assert temp_pcm.shape == (len(observed_idx), len(observed_idx)), \
+                    "Temp PCM shape mismatch with number of observation variables."
 
-        self.P = np.full((self.n_state_var, self.n_state_var), unobserved_variance, dtype=float)
-        
-        #! Deprecated np.zeros for np.full now that we have unobserved_variance param
-        # self.P = np.zeros((self.n_state_var, self.n_state_var))
+                self.P = np.full((self.n_state_var, self.n_state_var), unobserved_variance, dtype=float)
+                
+                #! Deprecated futils.np_zeros for np.full now that we have unobserved_variance param
+                # self.P = futils.np_zeros((self.n_state_var, self.n_state_var))
 
-        self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
-        if negate_cv: self.P = np.diag(np.diag(self.P))
-        if initialize_state: self.x = self._construct_state(z=data[init_n - 1])
+                self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
+                if negate_cv: self.P = np.diag(np.diag(self.P))
+
+        self.x = self._construct_state(z=data[init_n - 1])
         return data[init_n:]
 
     def forward(
@@ -159,7 +169,7 @@ class KalmanFilter:
                 init_n=batch_init_n, 
                 negate_cv=batch_init_negate_cv,
                 unobserved_variance=0.32,
-                initialize_state=True,
+                initialize_pcm=True,
                 transpose=True)
         records = [
             {
@@ -181,3 +191,27 @@ class KalmanFilter:
         
         if not return_history: return [tuple(i for i in self.x.T[0])]
         else: return estimations
+
+    def save_state(self, file: Optional[str] = None, matrices: Optional[Union[list, str]] = None):
+        if matrices is None: matrices = self.STATIC_MATRICES
+        if file is None: file = self.save_file
+        
+        if isinstance(matrices, str): matrices = list(matrices)
+        np.savez(file, **{i: getattr(self, i) for i in matrices + self.RUNTIME_MATRICES + self.MODEL_PARAMS if hasattr(self, i)})
+
+    @classmethod
+    def extract_checkpoint(cls, file) -> Any: 
+        return np.load(file)
+
+    @classmethod
+    def from_file(cls, file):
+        data = cls.extract_checkpoint(file)
+        return cls(
+            n_state_var=data['n_state_var'],
+            n_measurement_inputs=data['n_measurement_inputs'],
+            A=data.get('A'),
+            H=data.get('H'),
+            B=data.get('B'),
+            R=data.get('R'),
+            q=data.get('q')
+        )

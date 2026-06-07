@@ -1,10 +1,10 @@
 import numpy as np, pandas as pd
 
 from kfilter import KalmanFilter
-from utils.utils import np_arr
+from utils import np_arr
 
 
-if __name__ == '__name__':
+if __name__ == '__main__':
     # For R matrix
     err_obs_pos = 0.0025 # default, standard bathroom scale error += 1% or 2% of current body weight
     default_t, n_state_var, n_measurement_var = 1, 2, 1
@@ -69,9 +69,12 @@ if __name__ == '__name__':
         # B=df['B'],
         # u=df['u'],
         return_history=True,
-        # batch_init_n=batch_init_n,
-        batch_init_n=1,
+        batch_init_n=batch_init_n,
         batch_init_negate_cv=True
     )
 
-    print(results)
+    filter.save_state(matrices='H')
+    prev_filter = KalmanFilter.extract_checkpoint(file='kfilter_save.npz')
+    newk_filter = KalmanFilter.from_file(file='kfilter_save.npz')
+
+    ...
