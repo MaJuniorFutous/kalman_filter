@@ -5,6 +5,7 @@ import datetime
 import numpy as np, pandas as pd
 
 
+
 def np_arr(x: list) -> NDArray[Any]: return np.array(x, dtype=float)
 
 def np_ident(x: int) -> NDArray[Any]: return np.identity(x, dtype=float)
@@ -33,11 +34,11 @@ class KalmanFilter:
 
         self.x = np_zeros((n_state_var, 1))
         self.P = np_ident(n_state_var)  # PCM
-        self.H = H if H.size!=0 else np_zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
-        self.A = A if A else np_ident(n_state_var)  # state transition matrix
+        self.H = H if H is not None else np_zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
+        self.A = A if A is not None else np_ident(n_state_var)  # state transition matrix
         self.B = B  # control matrix
-        self.q = q if q else np_ident(n_state_var)  # process noise covariance
-        self.R = R if R else np_ident(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
+        self.q = q if q is not None else np_ident(n_state_var)  # process noise covariance
+        self.R = R if R is not None else np_ident(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
         self._I = np_ident(n_state_var)
         self.K = np_zeros((n_state_var, n_measurement_inputs)) # Kalman gain
 
@@ -158,11 +159,14 @@ class KalmanFilter:
             u: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
             return_history: Optional[bool] = False,
             batch_init_n: Optional[int] = None,
-            batch_init_negate_cv: bool = False):
+            batch_init_negate_cv: bool = False,
+            initialize_pcm: bool = False,
+            unobserved_variance: Optional[float] = None,
+            bootstrap_transpose: bool = True):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
-        if batch_init_negate_cv is not None and batch_init_n is None:
+        if batch_init_negate_cv and batch_init_n is None:
             raise ValueError("batch_init must be set if batch_init_negate_cv is provided")
         # if ignore_1st and (batch_init_negate_cv or batch_init_negate_cv):
         #     print("Prioritizing batch initialization over initial state setting using 1st row.")
@@ -173,9 +177,9 @@ class KalmanFilter:
                 data=data, 
                 init_n=batch_init_n, 
                 negate_cv=batch_init_negate_cv,
-                unobserved_variance=0.32,
-                initialize_pcm=True,
-                transpose=True)
+                unobserved_variance=unobserved_variance,
+                initialize_pcm=initialize_pcm,
+                transpose=bootstrap_transpose)
         records = [
             {
                 'data': data[i],
@@ -202,11 +206,13 @@ class KalmanFilter:
         if file is None: file = self.save_file
         
         if isinstance(matrices, str): matrices = list(matrices)
-        np.savez(file, **{i: getattr(self, i) for i in matrices + self.RUNTIME_MATRICES + self.MODEL_PARAMS if hasattr(self, i)})
+        np.savez(file, 
+                 **{i: getattr(self, i) for i in matrices + self.RUNTIME_MATRICES + self.MODEL_PARAMS if hasattr(self, i)}, 
+                 allow_pickle=True)
 
     @classmethod
     def extract_checkpoint(cls, file) -> Any: 
-        return np.load(file)
+        return np.load(file, allow_pickle=True)
 
     @classmethod
     def from_file(cls, file):
