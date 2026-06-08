@@ -1,10 +1,15 @@
-from typing import Any, Union, Literal, Optional
+from numpy._typing._array_like import NDArray
+from typing import Any, Union, Optional
 import datetime
 
 import numpy as np, pandas as pd
-import utils as futils
 
-#TODO: Create save mechanism
+
+def np_arr(x: list) -> NDArray[Any]: return np.array(x, dtype=float)
+
+def np_ident(x: int) -> NDArray[Any]: return np.identity(x, dtype=float)
+
+def np_zeros(x: tuple) -> NDArray[Any]: return np.zeros(x, dtype=float)
 
 class KalmanFilter:
 
@@ -26,15 +31,15 @@ class KalmanFilter:
         self.n_state_var = n_state_var
         self.n_measurement_inputs = n_measurement_inputs
 
-        self.x = futils.np_zeros((n_state_var, 1))
-        self.P = futils.np_ident(n_state_var)  # PCM
-        self.H = H if H.size!=0 else futils.np_zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
-        self.A = A if A else futils.np_ident(n_state_var)  # state transition matrix
+        self.x = np_zeros((n_state_var, 1))
+        self.P = np_ident(n_state_var)  # PCM
+        self.H = H if H.size!=0 else np_zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
+        self.A = A if A else np_ident(n_state_var)  # state transition matrix
         self.B = B  # control matrix
-        self.q = q if q else futils.np_ident(n_state_var)  # process noise covariance
-        self.R = R if R else futils.np_ident(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
-        self._I = futils.np_ident(n_state_var)
-        self.K = futils.np_zeros((n_state_var, n_measurement_inputs)) # Kalman gain
+        self.q = q if q else np_ident(n_state_var)  # process noise covariance
+        self.R = R if R else np_ident(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
+        self._I = np_ident(n_state_var)
+        self.K = np_zeros((n_state_var, n_measurement_inputs)) # Kalman gain
 
         self.save_file = save_file
 
@@ -69,7 +74,7 @@ class KalmanFilter:
     def _update(self, z: Union[np.ndarray, float], R = None):
         if R is None: R = self.R
         elif np.isscalar(R):
-            R = futils.np_ident(self.n_measurement_inputs) * R
+            R = np_ident(self.n_measurement_inputs) * R
 
         z = np.atleast_2d(z)
         if z.shape[1] == self.n_measurement_inputs: z = z.T
@@ -134,8 +139,8 @@ class KalmanFilter:
 
                 self.P = np.full((self.n_state_var, self.n_state_var), unobserved_variance, dtype=float)
                 
-                #! Deprecated futils.np_zeros for np.full now that we have unobserved_variance param
-                # self.P = futils.np_zeros((self.n_state_var, self.n_state_var))
+                #! Deprecated np_zeros for np.full now that we have unobserved_variance param
+                # self.P = np_zeros((self.n_state_var, self.n_state_var))
 
                 self.P[np.ix_(observed_idx, observed_idx)] = temp_pcm
                 if negate_cv: self.P = np.diag(np.diag(self.P))
@@ -153,7 +158,7 @@ class KalmanFilter:
             u: Optional[Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
             return_history: Optional[bool] = False,
             batch_init_n: Optional[int] = None,
-            batch_init_negate_cv: Optional[bool] = None):
+            batch_init_negate_cv: bool = False):
         if not isinstance(data, (np.ndarray, pd.DataFrame, pd.Series)):
             raise TypeError("data must be a numpy array or pandas DataFrame")
         '''Sort ascending by date first, custom_deltaT is the index of the custom deltaT column'''
