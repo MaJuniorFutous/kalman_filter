@@ -201,14 +201,25 @@ class KalmanFilter:
         if not return_history: return [tuple(i for i in self.x.T[0])]
         else: return estimations
 
-    def save_state(self, file: Optional[str] = None, matrices: Optional[Union[list, str]] = None):
+    def save_state(
+            self, 
+            file: Optional[str] = None, 
+            matrices: Optional[Union[list, str]] = None,
+            mdata: dict = None):
         if matrices is None: matrices = self.STATIC_MATRICES
         if file is None: file = self.save_file
         
         if isinstance(matrices, str): matrices = list(matrices)
-        np.savez(file, 
-                 **{i: getattr(self, i) for i in matrices + self.RUNTIME_MATRICES + self.MODEL_PARAMS if hasattr(self, i)}, 
-                 allow_pickle=True)
+        data = {i: getattr(self, i) for i in matrices + self.RUNTIME_MATRICES + self.MODEL_PARAMS if hasattr(self, i)}
+        if mdata:
+            np.savez(file,
+                    **data,
+                    metadata=mdata,
+                    allow_pickle=True)
+        else:
+            np.savez(file,
+                    **data,
+                    allow_pickle=True)
 
     @classmethod
     def extract_checkpoint(cls, file) -> Any: 

@@ -73,8 +73,6 @@ if __name__ == '__main__':
         batch_init_negate_cv=True
     )
 
-    filter.save_state(matrices='H')
+    filter.save_state(matrices='H', mdata={'date': df['datetime'].iloc[-1].strftime("%Y-%m-%d")})
     prev_filter = KalmanFilter.extract_checkpoint(file='kfilter_save.npz')
     newk_filter = KalmanFilter.from_file(file='kfilter_save.npz')
-
-    ...
