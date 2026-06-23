@@ -1,7 +1,7 @@
 import numpy as np, pandas as pd
 
-from kfilter import KalmanFilter
-from utils import np_arr
+from src.kalman_filter.kfilter import KalmanFilter
+from src.kalman_filter.utils import np_arr
 
 
 if __name__ == '__main__':

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalman-filter"
+version = "0.1.0"
+description = "Simple Kalman filter implementation."
+requires-python = ">=3.11"  # needed for later versiono of Pandas
+dependencies = [
+  "pandas"  # will install numpy as its depenancy
+]
+[project.optional-dependencies]
+dev = [
+    "jupyter",
+    "ipykernel"
+]
