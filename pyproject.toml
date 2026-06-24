@@ -10,6 +10,12 @@ requires-python = ">=3.11"  # needed for later versiono of Pandas
 dependencies = [
   "pandas"  # will install numpy as its depenancy
 ]
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project.optional-dependencies]
 dev = [
     "jupyter",
