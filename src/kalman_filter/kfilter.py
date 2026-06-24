@@ -1,4 +1,4 @@
-from numpy._typing._array_like import NDArray
+from numpy.typing import NDArray
 from typing import Any, Union, Optional
 import datetime
 
