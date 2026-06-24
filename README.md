@@ -1,7 +1,8 @@
 A simple Kalman Filter implimentation in python.
 
-git commit -am "Some message"
+git add .
+git commit -m "v0.1.0 release"
+git push origin main
 
-git tag v0.2.0
-git push origin <branch>
-git push origin v0.2.0
+git tag -a v0.1.0 -m "v0.1.0 release"
+git push origin v0.1.0
