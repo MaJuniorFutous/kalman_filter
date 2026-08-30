@@ -37,7 +37,7 @@ class KalmanFilter:
         self.H = H if H is not None else np_zeros((n_measurement_inputs, n_state_var))  # observation matrix/measurement function
         self.A = A if A is not None else np_ident(n_state_var)  # state transition matrix
         self.B = B  # control matrix
-        self.q = q if q is not None else np_ident(n_state_var)  # process noise covariance
+        self.q = q if q is not None else np_zeros(n_state_var)  # process noise covariance
         self.R = R if R is not None else np_ident(n_measurement_inputs)  # measurement/observation noise covariance (PCM)
         self._I = np_ident(n_state_var)
         self.K = np_zeros((n_state_var, n_measurement_inputs)) # Kalman gain
@@ -86,7 +86,7 @@ class KalmanFilter:
             )
 
         # Kalman Gain
-        # equation (deprecated, we dont actually need to calculate the inverse)
+        #! equation (deprecated, we dont actually need to calculate the inverse)
         # S = H@predicted_pcm@H.T + R # inovation covariance
         # K = predicted_pcm@H.T@np.linalg.inv(S)
 
@@ -180,6 +180,8 @@ class KalmanFilter:
                 unobserved_variance=unobserved_variance,
                 initialize_pcm=initialize_pcm,
                 transpose=bootstrap_transpose)
+            # trim q matrix by batch_init_n amount
+            q = q[batch_init_n:]
         records = [
             {
                 'data': data[i],
